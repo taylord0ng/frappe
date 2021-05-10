@@ -42,7 +42,8 @@ def setup_database(force, source_sql, verbose, no_mariadb_socket=False):
 			dbman.delete_user(db_name, host="%")
 		dbman.drop_database(db_name)
 	else:
-		raise Exception("Database %s already exists" % (db_name,))
+		#raise Exception("Database %s already exists" % (db_name,))
+		print("Database %s already exists" % db_name)
 
 	dbman.create_user(db_name, frappe.conf.db_password)
 	if no_mariadb_socket:
