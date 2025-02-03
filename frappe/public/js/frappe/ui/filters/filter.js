@@ -20,10 +20,10 @@ frappe.ui.Filter = class {
 			["in", __("In")],
 			["not in", __("Not In")],
 			["is", __("Is")],
-			[">", ">"],
-			["<", "<"],
-			[">=", ">="],
-			["<=", "<="],
+			[">", __("Greater Than")],
+			["<", __("Less Than")],
+			[">=", __("Greater Than Or Equal To")],
+			["<=", __("Less Than Or Equal To")],
 			["Between", __("Between")],
 			["Timespan", __("Timespan")],
 		];
@@ -55,6 +55,21 @@ frappe.ui.Filter = class {
 			Int: ["like", "not like", "Between", "in", "not in", "Timespan"],
 			Float: ["like", "not like", "Between", "in", "not in", "Timespan"],
 			Percent: ["like", "not like", "Between", "in", "not in", "Timespan"],
+		};
+
+		this.special_condition_labels = {
+			Date: {
+				"<": __("Before"),
+				">": __("After"),
+				"<=": __("On or Before"),
+				">=": __("On or After"),
+			},
+			Datetime: {
+				"<": __("Before"),
+				">": __("After"),
+				"<=": __("On or Before"),
+				">=": __("On or After"),
+			},
 		};
 	}
 
@@ -274,6 +289,7 @@ frappe.ui.Filter = class {
 	make_field(df, old_fieldtype) {
 		let old_text = this.field ? this.field.get_value() : null;
 		this.hide_invalid_conditions(df.fieldtype, df.original_type);
+		this.set_special_condition_labels(df.original_type);
 		this.toggle_nested_set_conditions(df);
 		let field_area = this.filter_edit_area.find(".filter-field").empty().get(0);
 		df.input_class = "input-xs";
@@ -398,6 +414,22 @@ frappe.ui.Filter = class {
 		}
 	}
 
+	set_special_condition_labels(original_type) {
+		let special_conditions = this.special_condition_labels[original_type] || {};
+		for (let condition of this.conditions) {
+			let special_label = special_conditions[condition[0]];
+			if (special_label) {
+				this.filter_edit_area
+					.find(`.condition option[value="${condition[0]}"]`)
+					.text(special_label);
+			} else {
+				this.filter_edit_area
+					.find(`.condition option[value="${condition[0]}"]`)
+					.text(__(condition[1]));
+			}
+		}
+	}
+
 	toggle_nested_set_conditions(df) {
 		let show_condition =
 			df.fieldtype === "Link" && frappe.boot.nested_set_doctypes.includes(df.options);
@@ -468,7 +500,8 @@ frappe.ui.filter_utils = {
 	},
 
 	get_default_condition(df) {
-		if (df.fieldtype == "Data") {
+		const meta = frappe.get_meta(df.parent);
+		if (df.fieldtype == "Data" && !meta?.is_large_table) {
 			return "like";
 		} else if (df.fieldtype == "Date" || df.fieldtype == "Datetime") {
 			return "Between";
@@ -575,9 +608,9 @@ frappe.ui.filter_utils = {
 
 	get_timespan_options(periods) {
 		const period_map = {
-			Last: ["Week", "Month", "Quarter", "6 months", "Year"],
+			Last: ["7 Days", "14 Days", "30 Days", "Week", "Month", "Quarter", "6 months", "Year"],
 			This: ["Week", "Month", "Quarter", "Year"],
-			Next: ["Week", "Month", "Quarter", "6 months", "Year"],
+			Next: ["7 Days", "14 Days", "30 Days", "Week", "Month", "Quarter", "6 months", "Year"],
 		};
 		let options = [];
 		periods.forEach((period) => {
