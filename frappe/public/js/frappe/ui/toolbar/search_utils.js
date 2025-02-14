@@ -97,7 +97,7 @@ frappe.search.utils = {
 						break;
 				}
 			} else if (match[0]) {
-				out.label = match[0].bold();
+				out.label = frappe.utils.escape_html(match[0]).bold();
 				out.value = match[0];
 			} else {
 				console.log("Illegal match", match);
@@ -447,7 +447,7 @@ frappe.search.utils = {
 			data.forEach(function (d) {
 				// more properties
 				result = {
-					label: d.name,
+					label: d.title || d.name, // show title if exists
 					value: d.name,
 					description: make_description(d.content, d.name),
 					route: ["Form", d.doctype, d.name],

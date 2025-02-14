@@ -16,7 +16,8 @@ frappe.ui.form.on("Server Script", {
 			});
 		}
 
-		frm.call("get_autocompletion_items")
+		frappe
+			.call("frappe.core.doctype.server_script.server_script.get_autocompletion_items")
 			.then((r) => r.message)
 			.then((items) => {
 				frm.set_df_property("script", "autocompletions", items);
@@ -72,20 +73,23 @@ if doc.allocated_to:
 # retreive payment session state
 ps = doc.flags.payment_session
 
-if ps.changed: # could be an idempotent run
-	if ps.flags.status_changed_to in ps.flowstates.success:
+if ps.is_success:
+	if ps.changed: # could be an idempotent run
 		doc.set_as_paid()
-		# custom process return values
-		doc.flags.payment_result = {
-			"message": "Thank you for your payment",
-			"action": {"href": "https://shop.example.com", "label": "Return to shop"},
-		}
-	if ps.flags.status_changed_to in ps.flowstates.pre_authorized:
-		# do something else
-	if ps.flags.status_changed_to in ps.flowstates.processing:
-		# do something else
-	if ps.flags.status_changed_to in ps.flowstates.declined:
-		# do something else
+	# custom process return values
+	doc.flags.payment_session.result = {
+		"message": "Thank you for your payment",
+		"action": {"href": "https://shop.example.com", "label": "Return to shop"},
+	}
+if ps.is_pre_authorized:
+	if ps.changed: # could be an idempotent run
+		...
+if ps.is_processing:
+	if ps.changed: # could be an idempotent run
+		...
+if ps.is_declined:
+	if ps.changed: # could be an idempotent run
+		...
 </code>
 </pre>
 <p>The <i>On Payment Failed</i> (<code>on_payment_failed</code>) event only transports the error message which the controller implementation had extracted from the transaction.</p>
