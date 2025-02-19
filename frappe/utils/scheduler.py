@@ -14,7 +14,6 @@ import random
 import time
 from typing import NoReturn
 
-import pytz
 import setproctitle
 from croniter import CroniterBadCronError
 from filelock import FileLock, Timeout
@@ -48,7 +47,7 @@ def start_scheduler() -> NoReturn:
 	tick = get_scheduler_tick()
 	set_niceness()
 
-	lock_path = os.path.abspath(os.path.join(get_bench_path(), "config", "scheduler_process"))
+	lock_path = _get_scheduler_lock_file()
 
 	try:
 		lock = FileLock(lock_path)
@@ -63,6 +62,25 @@ def start_scheduler() -> NoReturn:
 		enqueue_events_for_all_sites()
 
 
+def _get_scheduler_lock_file() -> True:
+	return os.path.abspath(os.path.join(get_bench_path(), "config", "scheduler_process"))
+
+
+def is_schduler_process_running() -> bool:
+	"""Checks if any other process is holding the lock.
+
+	Note: FLOCK is held by process until it exits, this function just checks if process is
+	running or not. We can't determine if process is stuck somehwere.
+	"""
+	try:
+		lock = FileLock(_get_scheduler_lock_file())
+		lock.acquire(blocking=False)
+		lock.release()
+		return False
+	except Timeout:
+		return True
+
+
 def sleep_duration(tick):
 	if tick != DEFAULT_SCHEDULER_TICK:
 		# Assuming user knows what they want.
@@ -72,7 +90,7 @@ def sleep_duration(tick):
 	# This makes scheduler aligned with real clock,
 	# so event scheduled at 12:00 happen at 12:00 and not 12:00:35.
 	minutes = tick // 60
-	now = datetime.datetime.now(pytz.UTC)
+	now = datetime.datetime.now(datetime.timezone.utc)
 	left_minutes = minutes - now.minute % minutes
 	next_execution = now.replace(second=0) + datetime.timedelta(minutes=left_minutes)
 
@@ -101,7 +119,7 @@ def enqueue_events_for_site(site: str) -> None:
 
 	try:
 		_proctitle(f"scheduling events for {site}")
-		frappe.init(site=site)
+		frappe.init(site)
 		frappe.connect()
 		if is_scheduler_inactive():
 			return
@@ -202,6 +220,9 @@ def schedule_jobs_based_on_activity(check_time=None):
 
 
 def is_dormant(check_time=None):
+	# Assume never dormant if developer_mode is enabled
+	if frappe.conf.developer_mode:
+		return False
 	last_activity_log_timestamp = _get_last_creation_timestamp("Activity Log")
 	since = (frappe.get_system_settings("dormant_days") or 4) * 86400
 	if not last_activity_log_timestamp:

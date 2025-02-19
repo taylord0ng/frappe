@@ -3,11 +3,11 @@
 import frappe
 from frappe.cache_manager import clear_controller_cache
 from frappe.desk.doctype.todo.todo import ToDo
+from frappe.tests import IntegrationTestCase
 from frappe.tests.test_api import FrappeAPITestCase
-from frappe.tests.utils import FrappeTestCase, patch_hooks
 
 
-class TestHooks(FrappeTestCase):
+class TestHooks(IntegrationTestCase):
 	def test_hooks(self):
 		hooks = frappe.get_hooks()
 		self.assertTrue(isinstance(hooks.get("app_name"), list))
@@ -26,7 +26,7 @@ class TestHooks(FrappeTestCase):
 		hooks.override_doctype_class = {"ToDo": ["frappe.tests.test_hooks.CustomToDo"]}
 
 		# Clear cache
-		frappe.cache.delete_value("app_hooks")
+		frappe.client_cache.delete_value("app_hooks")
 		clear_controller_cache("ToDo")
 
 		todo = frappe.get_doc(doctype="ToDo", description="asdf")
@@ -53,7 +53,7 @@ class TestHooks(FrappeTestCase):
 		hooks.has_permission["*"] = wildcard_has_permission_hook
 
 		# Clear cache
-		frappe.cache.delete_value("app_hooks")
+		frappe.client_cache.delete_value("app_hooks")
 
 		# Init User and Address
 		username = "test@example.com"
@@ -188,7 +188,7 @@ class TestHooks(FrappeTestCase):
 
 class TestAPIHooks(FrappeAPITestCase):
 	def test_auth_hook(self):
-		with patch_hooks({"auth_hooks": ["frappe.tests.test_hooks.custom_auth"]}):
+		with self.patch_hooks({"auth_hooks": ["frappe.tests.test_hooks.custom_auth"]}):
 			site_url = frappe.utils.get_site_url(frappe.local.site)
 			response = self.get(
 				site_url + "/api/method/frappe.auth.get_logged_user",

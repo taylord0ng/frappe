@@ -8,7 +8,7 @@ import re
 from typing import TYPE_CHECKING, Optional, TypedDict
 
 import frappe
-from frappe import _, get_module_path
+from frappe import _, cstr, get_module_path
 from frappe.core.doctype.access_log.access_log import make_access_log
 from frappe.core.doctype.document_share_key.document_share_key import is_expired
 from frappe.utils import cint, escape_html, strip_html
@@ -41,13 +41,21 @@ class PrintContext(TypedDict):
 def get_context(context) -> PrintContext:
 	"""Build context for print"""
 	if not ((frappe.form_dict.doctype and frappe.form_dict.name) or frappe.form_dict.doc):
-		return {
-			"body": f"""
-				<h1>Error</h1>
-				<p>Parameters doctype and name required</p>
-				<pre>{escape_html(frappe.as_json(frappe.form_dict, indent=2))}</pre>
-				"""
-		}
+		return PrintContext(
+			print_style="",
+			comment="",
+			title="Error",
+			lang="en",
+			layout_direction="ltr",
+			doctype="",
+			name="",
+			key="",
+			body=f"""
+<h1>Error</h1>
+<p>Parameters doctype and name required</p>
+<pre>{escape_html(frappe.as_json(frappe.form_dict, indent=2))}</pre>
+""",
+		)
 
 	if frappe.form_dict.doc:
 		doc = frappe.form_dict.doc
@@ -64,11 +72,6 @@ def get_context(context) -> PrintContext:
 
 	print_format = get_print_format_doc(None, meta=meta)
 
-	make_access_log(
-		doctype=frappe.form_dict.doctype, document=frappe.form_dict.name, file_type="PDF", method="Print"
-	)
-
-	print_style = None
 	body = get_rendered_template(
 		doc,
 		print_format=print_format,
@@ -78,18 +81,24 @@ def get_context(context) -> PrintContext:
 		letterhead=letterhead,
 		settings=settings,
 	)
-	print_style = get_print_style(frappe.form_dict.style, print_format)
+
+	make_access_log(
+		doctype=frappe.form_dict.doctype, document=frappe.form_dict.name, file_type="PDF", method="Print"
+	)
 
 	return {
 		"body": body,
-		"print_style": print_style,
+		"print_style": get_print_style(frappe.form_dict.style, print_format),
 		"comment": frappe.session.user,
-		"title": frappe.utils.strip_html(doc.get_title() or doc.name),
+		"title": frappe.utils.strip_html(cstr(doc.get_title() or doc.name)),
 		"lang": frappe.local.lang,
 		"layout_direction": "rtl" if is_rtl() else "ltr",
 		"doctype": frappe.form_dict.doctype,
 		"name": frappe.form_dict.name,
 		"key": frappe.form_dict.get("key"),
+		"print_format": getattr(print_format, "name", None),
+		"letterhead": letterhead,
+		"no_letterhead": frappe.form_dict.no_letterhead,
 	}
 
 
@@ -117,6 +126,9 @@ def get_rendered_template(
 	trigger_print: bool = False,
 	settings: dict | None = None,
 ) -> str:
+	if not frappe.flags.ignore_print_permissions:
+		validate_print_permission(doc)
+
 	print_settings = frappe.get_single("Print Settings").as_dict()
 	print_settings.update(settings or {})
 
@@ -128,9 +140,6 @@ def get_rendered_template(
 
 	doc.flags.in_print = True
 	doc.flags.print_settings = print_settings
-
-	if not frappe.flags.ignore_print_permissions:
-		validate_print_permission(doc)
 
 	if doc.meta.is_submittable:
 		if doc.docstatus.is_draft() and not cint(print_settings.allow_print_for_draft):
@@ -311,7 +320,7 @@ def get_html_and_style(
 	trigger_print: bool = False,
 	style: str | None = None,
 	settings: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, str | None]:
 	"""Return `html` and `style` of print format, used in PDF etc."""
 
 	if isinstance(name, str):
@@ -366,14 +375,16 @@ def get_rendered_raw_commands(doc: str, name: str | None = None, print_format: s
 
 def validate_print_permission(doc: "Document") -> None:
 	for ptype in ("read", "print"):
-		if frappe.has_permission(doc.doctype, ptype, doc) or frappe.has_website_permission(doc):
+		if frappe.has_permission(doc.doctype, ptype, doc):
 			return
 
-	key = frappe.form_dict.key
-	if key and isinstance(key, str):
-		validate_key(key, doc)
-	else:
-		raise frappe.PermissionError(_("You do not have permission to view this document"))
+	if frappe.has_website_permission(doc):
+		return
+
+	if (key := frappe.form_dict.key) and isinstance(key, str) and validate_key(key, doc) is not False:
+		return
+
+	doc._handle_permission_failure("print")
 
 
 def validate_key(key: str, doc: "Document") -> None:
@@ -392,7 +403,7 @@ def validate_key(key: str, doc: "Document") -> None:
 	if frappe.get_system_settings("allow_older_web_view_links") and key == doc.get_signature():
 		return
 
-	raise frappe.exceptions.InvalidKeyError
+	return False
 
 
 def get_letter_head(doc: "Document", no_letterhead: bool, letterhead: str | None = None) -> dict:

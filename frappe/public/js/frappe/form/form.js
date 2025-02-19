@@ -38,7 +38,7 @@ frappe.ui.form.Form = class FrappeForm {
 		this.events = {};
 		this.fetch_dict = {};
 		this.parent = parent;
-		this.doctype_layout = frappe.get_doc("DocType Layout", doctype_layout_name);
+		this.doctype_layout = frappe.get_meta(doctype_layout_name);
 		this.undo_manager = new UndoManager({ frm: this });
 		this.setup_meta(doctype);
 		this.debounced_reload_doc = frappe.utils.debounce(this.reload_doc.bind(this), 1000);
@@ -52,7 +52,7 @@ frappe.ui.form.Form = class FrappeForm {
 	}
 
 	setup_meta() {
-		this.meta = frappe.get_doc("DocType", this.doctype);
+		this.meta = frappe.get_meta(this.doctype);
 
 		if (this.meta.istable) {
 			this.meta.in_dialog = 1;
@@ -84,6 +84,7 @@ frappe.ui.form.Form = class FrappeForm {
 		frappe.ui.make_app_page({
 			parent: this.wrapper,
 			single_column: is_single_column,
+			sidebar_position: "Right",
 		});
 		this.page = this.wrapper.page;
 		this.layout_main = this.page.main.get(0);
@@ -167,6 +168,7 @@ frappe.ui.form.Form = class FrappeForm {
 			shortcut: "ctrl+p",
 			action: () => this.print_doc(),
 			description: __("Print document"),
+			condition: () => frappe.model.can_print(this.doctype, this) && !this.meta.issingle,
 		});
 
 		let grid_shortcut_keys = [
@@ -331,6 +333,14 @@ frappe.ui.form.Form = class FrappeForm {
 		$(document).on("rename", (ev, dt, old_name, new_name) => {
 			if (dt == this.doctype) this.rename_notify(dt, old_name, new_name);
 		});
+
+		frappe.realtime.on("doc_rename", (data) => {
+			// the current form has been renamed by some backend process
+			if (data.doctype == this.doctype && data.old == this.docname) {
+				// the current form does not exist anymore, route to the new one
+				frappe.set_route("Form", this.doctype, data.new);
+			}
+		});
 	}
 
 	setup_file_drop() {
@@ -417,7 +427,7 @@ frappe.ui.form.Form = class FrappeForm {
 			// read only (workflow)
 			this.read_only = frappe.workflow.is_read_only(this.doctype, this.docname);
 			if (this.read_only) {
-				this.set_read_only(true);
+				this.set_read_only();
 				frappe.show_alert(__("This form is not editable due to a Workflow."));
 			}
 
@@ -514,7 +524,7 @@ frappe.ui.form.Form = class FrappeForm {
 
 				// feedback
 				frappe.msgprint({
-					message: __("{} Complete", [action.label]),
+					message: __("{} Complete", [__(action.label)]),
 					alert: true,
 				});
 			});
@@ -549,7 +559,6 @@ frappe.ui.form.Form = class FrappeForm {
 	}
 
 	trigger_onload(switched) {
-		this.cscript.is_onload = false;
 		if (!this.opendocs[this.docname]) {
 			var me = this;
 			this.cscript.is_onload = true;
@@ -627,6 +636,7 @@ frappe.ui.form.Form = class FrappeForm {
 				() => this.cscript.is_onload && this.is_new() && this.focus_on_first_input(),
 				() => this.run_after_load_hook(),
 				() => this.dashboard.after_refresh(),
+				() => (this.cscript.is_onload = false),
 			]);
 		} else {
 			this.refresh_header(switched);
@@ -670,6 +680,10 @@ frappe.ui.form.Form = class FrappeForm {
 	}
 
 	refresh_fields() {
+		if (this.layout === undefined) {
+			return;
+		}
+
 		this.layout.refresh(this.doc);
 		this.layout.primary_button = this.$wrapper.find(".btn-primary");
 
@@ -899,18 +913,15 @@ frappe.ui.form.Form = class FrappeForm {
 				args: {
 					doctype: me.doc.doctype,
 					name: me.doc.name,
+					ignore_doctypes_on_cancel_all: me.ignore_doctypes_on_cancel_all,
 				},
 				freeze: true,
 			})
 			.then((r) => {
 				if (!r.exc) {
-					let doctypes_to_cancel = (r.message.docs || [])
-						.map((value) => {
-							return value.doctype;
-						})
-						.filter((value) => {
-							return !me.ignore_doctypes_on_cancel_all.includes(value);
-						});
+					let doctypes_to_cancel = (r.message.docs || []).map((value) => {
+						return value.doctype;
+					});
 
 					if (doctypes_to_cancel.length) {
 						return me._cancel_all(r, btn, callback, on_error);
@@ -1465,14 +1476,6 @@ frappe.ui.form.Form = class FrappeForm {
 
 		let btn = this.page.add_inner_button(label, fn, group);
 
-		if (btn) {
-			// Add actions as menu item in Mobile View
-			let menu_item_label = group ? `${group} > ${label}` : label;
-			let menu_item = this.page.add_menu_item(menu_item_label, fn, false);
-			menu_item.parent().addClass("hidden-xl");
-
-			this.custom_buttons[label] = btn;
-		}
 		return btn;
 	}
 
@@ -1842,6 +1845,7 @@ frappe.ui.form.Form = class FrappeForm {
 				email: p.email,
 			};
 		});
+		this.refresh_fields();
 	}
 
 	trigger(event, doctype, docname) {
@@ -1862,11 +1866,7 @@ frappe.ui.form.Form = class FrappeForm {
 	}
 
 	get_title() {
-		if (this.meta.title_field) {
-			return this.doc[this.meta.title_field];
-		} else {
-			return String(this.doc.name);
-		}
+		return frappe.model.get_doc_title(this.doc);
 	}
 
 	get_selected() {
@@ -1915,7 +1915,7 @@ frappe.ui.form.Form = class FrappeForm {
 				if (get_text) {
 					label = get_text(doc);
 				} else if (frappe.form.link_formatters[df.options]) {
-					label = frappe.form.link_formatters[df.options](value, doc);
+					label = frappe.form.link_formatters[df.options](value, doc, df);
 				} else {
 					label = value;
 				}
@@ -1954,7 +1954,7 @@ frappe.ui.form.Form = class FrappeForm {
 		if (this.can_make_methods && this.can_make_methods[doctype]) {
 			return this.can_make_methods[doctype](this);
 		} else {
-			if (this.meta.is_submittable && !this.doc.docstatus == 1) {
+			if (this.meta.is_submittable && this.doc.docstatus !== 1) {
 				return false;
 			} else {
 				return true;
@@ -2156,6 +2156,18 @@ frappe.ui.form.Form = class FrappeForm {
 		}
 
 		this.script_manager.trigger("on_tab_change");
+
+		// When switching tabs, we should tell fields to update their display if needed (e.g. Geolocation and Signature fields).
+		// This is done using the already existing on_section_collapse optional method.
+		let in_tab = false;
+		for (const df of this.layout.fields) {
+			const field = this.get_field(df.fieldname);
+			if (df?.fieldtype == "Tab Break") {
+				in_tab = df === tab?.df;
+			} else if (typeof field?.on_section_collapse == "function") {
+				field.on_section_collapse(!in_tab); // hide = !in_tab
+			}
+		}
 	}
 
 	get_active_tab() {

@@ -6,7 +6,7 @@ import frappe
 from frappe.core.doctype.scheduled_job_type.scheduled_job_type import ScheduledJobType, sync_jobs
 from frappe.core.doctype.server_script.server_script import ServerScript
 from frappe.frappeclient import FrappeClient, FrappeException
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import get_site_url
 
 scripts = [
@@ -108,7 +108,16 @@ doc.save()
 ]
 
 
-class TestServerScript(FrappeTestCase):
+class UnitTestServerScript(UnitTestCase):
+	"""
+	Unit tests for ServerScript.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestServerScript(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
@@ -118,7 +127,7 @@ class TestServerScript(FrappeTestCase):
 			script_doc = frappe.get_doc(doctype="Server Script")
 			script_doc.update(script)
 			script_doc.insert()
-		cls.enable_safe_exec()
+		cls.enterClassContext(cls.enable_safe_exec())
 		frappe.db.commit()
 		return super().setUpClass()
 
@@ -126,10 +135,10 @@ class TestServerScript(FrappeTestCase):
 	def tearDownClass(cls):
 		frappe.db.commit()
 		frappe.db.truncate("Server Script")
-		frappe.cache.delete_value("server_script_map")
+		frappe.client_cache.delete_value("server_script_map")
 
 	def setUp(self):
-		frappe.cache.delete_value("server_script_map")
+		frappe.client_cache.delete_value("server_script_map")
 
 	def test_doctype_event(self):
 		todo = frappe.get_doc(doctype="ToDo", description="hello").insert()
